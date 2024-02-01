@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 //set up buffers for reading / writing to files
-#define BUFFER_SIZE 500
+#define BUFFER_SIZE 9000
 char buf[BUFFER_SIZE];
 
 void freestrings(char *a, char *b) {
@@ -231,23 +231,34 @@ int main() {
             return 1;
         }
 
-        //now we can continue reading the content specified in the command WHILE writing
-
         //however, between bytes and content length, we must choose the shorter to write
         int bytes_to_write = atoi(bytes);
-        //if (atoi(bytes) <= ((int) strlen(content))) { bytes_to_write = atoi(bytes); }
-        //else { bytes_to_write = (int) strlen(content); }
+        fprintf(stderr, "%d \n", bytes_to_write);
 
         bytes_read_total = 0;
-        while ((bytes_read = read(STDIN_FILENO, buf, 1)) > 0 && bytes_read_total < bytes_to_write) {
+        while ((bytes_read = read(STDIN_FILENO, buf, BUFFER_SIZE)) >= 0
+               && bytes_read_total < bytes_to_write) {
 
-            int bytes_written = write(fd, buf + 1, 1);
+            //set up appropriate number of bytes to write this iteration
+            int bytes_to_write_rn = bytes_read;
+            if (bytes_read_total + bytes_read > bytes_to_write) {
+                bytes_to_write_rn = bytes_to_write - bytes_read_total;
+            }
 
-            if (bytes_written < 0) {
-                fprintf(stderr, "Operation Failed\n");
-                freestrings(commandcopy, command);
-                close(fd);
-                return 1;
+            //write them
+            int bytes_written_total = 0;
+            while (bytes_written_total < bytes_to_write_rn) {
+
+                int bytes_written = write(fd, buf + bytes_written_total, bytes_to_write_rn);
+
+                if (bytes_written < 0) {
+                    fprintf(stderr, "Operation Failed\n");
+                    freestrings(commandcopy, command);
+                    close(fd);
+                    return 1;
+                }
+
+                bytes_written_total += bytes_written;
             }
 
             bytes_read_total += bytes_read;
@@ -255,6 +266,7 @@ int main() {
 
         //write a sucess message to stdout
         fprintf(stdout, "OK\n");
+        fprintf(stderr, "%d \n", bytes_read_total);
 
         // close file
         close(fd);
