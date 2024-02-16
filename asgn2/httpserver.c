@@ -349,7 +349,6 @@ int main(int argc, char **argv) {
             while (written < atoi(r.value)) {
                 written += pass_n_bytes(socket, fd, atoi(r.value) - written);
             }
-            
 
             if (newfile) {
                 write_n_bytes(socket, response_201, strlen(response_201));
@@ -372,9 +371,8 @@ int main(int argc, char **argv) {
             // consume the data lmfao
             recv(socket, buffer, BUFFER_SIZE, 0);
         }
-        
+
         //finally close connection
         close(socket);
     }
 }
-
