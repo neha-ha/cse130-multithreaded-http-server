@@ -218,12 +218,14 @@ int main(int argc, char **argv) {
 
     // start looping the main process 
     while (1) {
+        fprintf(stderr, "hii \n");
 
         // listen for and accept any connections at that socket
         // listener_accept blocks execution until a new incoming connection is made to this port
         // then returns a socket
         //      socket-- pretty much a file descriptor, it's used to read / send bytes from / to the client
         int socket = listener_accept(&listener);
+        fprintf(stderr, "accepted connection \n");
 
         // read bytes from the user- start with 2048 bytes or until /r/n/r/n to see if the request is chilling
         read_until(socket, buffer, 2048, "\r\n\r\n");
@@ -326,8 +328,13 @@ int main(int argc, char **argv) {
 
             // now read all the request shit and then write it all to the file
             // passing content-length bytes from request to file
-            int bytes_left = atoi(r.value) - result;
-            fprintf(stderr, "%d \n", bytes_left);
+            char *ptr = NULL;
+            int bytes_left = strtol(r.value, &ptr, 10) - result;
+            fprintf(stderr, "bytes left %d \n", bytes_left);
+
+            int bytes_passed = pass_n_bytes(socket, fd, bytes_left);
+            fprintf(stderr, "bytes passed %d \n", bytes_passed);
+            fprintf(stderr, "errno: %s \n", strerror(errno));
 
 
 
@@ -357,24 +364,24 @@ int main(int argc, char **argv) {
             //     }
 
             //     bytes_read_total += bytes_read;
-            //     fprintf(stderr, "hi \n");
+            //     fprintf(stderr, "bytes read total %d \n", bytes_read_total);
             // }
 
-            int bytes_written = 0;
-            int bytes_read;
-            while (bytes_written < bytes_left) {
-                fprintf(stderr, "got in loop");
+            // int bytes_written = 0;
+            // int bytes_read;
+            // while (bytes_written < bytes_left) {
+            //     fprintf(stderr, "got in loop");
 
-                bytes_read = read_n_bytes(socket, buffer, bytes_left - bytes_written);
-                fprintf(stderr, "%d \n", bytes_read);
-                if (bytes_read > 0) {
-                    fprintf(stderr, "%d \n", bytes_read);
-                    bytes_written += write_n_bytes(fd, buffer, bytes_read);
-                }
-                else { break; }
+            //     bytes_read = read_n_bytes(socket, buffer, bytes_left - bytes_written);
+            //     fprintf(stderr, "%d \n", bytes_read);
+            //     if (bytes_read > 0) {
+            //         fprintf(stderr, "%d \n", bytes_read);
+            //         bytes_written += write_n_bytes(fd, buffer, bytes_read);
+            //     }
+            //     else { break; }
                 
-            }
-            fprintf(stderr, "%d \n", bytes_written);
+            // }
+            //fprintf(stderr, "%d \n", bytes_written);
 
 
             //pass_n_bytes(socket, fd, bytes_left);
