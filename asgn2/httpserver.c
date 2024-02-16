@@ -7,10 +7,13 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include "asgn2_helper_funcs.h"
 
 // get buffer set up
-#define BUFFER_SIZE 8000
+#define BUFFER_SIZE 6000
 char buffer[BUFFER_SIZE];
 
 // define constant parts of return strings
@@ -63,7 +66,7 @@ struct Request {
 
     // necessary for PUT requests-- and the HeaderField.key must be 'Content-Length', with the value being the # of bytes in the message body
     // illegal for GET requests
-    char message_body[8001];
+    char message_body[2000];
 };
 // uses regex to parse the fields and fills Request appropriately
 // returns number of bytes read into the message_body section if it's OK
@@ -99,6 +102,7 @@ int populate(struct Request *r) {
         regfree(&request_regex);
         regfree(&header_regex);
         regfree(&message_regex);
+        fprintf(stderr, "error0parse\n");
         return -1;
     }
 
@@ -115,6 +119,7 @@ int populate(struct Request *r) {
     // now match headers
     // start at the position in the buffer past the request line
     char *currentpos = buffer + request_matches[0].rm_eo;
+    int finalpos = request_matches[0].rm_eo;
 
     //for each match
     while (regexec(&header_regex, currentpos, 3, header_matches, 0) == 0) {
@@ -126,6 +131,7 @@ int populate(struct Request *r) {
             regfree(&request_regex);
             regfree(&header_regex);
             regfree(&message_regex);
+            fprintf(stderr, "error1parse\n");
             return -1;
         }
 
@@ -144,11 +150,12 @@ int populate(struct Request *r) {
 
         // move to next part of the string
         currentpos += header_matches[0].rm_eo;
+        finalpos += header_matches[0].rm_eo;
     }
 
     // alr now time to match the message body
     // this initializes a return value for the number of bytes read into the message body at this stage
-    int returnvalue = 0; // if no message body, just return this
+    //int returnvalue = 0; // if no message body, just return this
 
     if (regexec(&message_regex, currentpos, 2, message_matches, 0) == 0) {
 
@@ -157,17 +164,19 @@ int populate(struct Request *r) {
             regfree(&request_regex);
             regfree(&header_regex);
             regfree(&message_regex);
+            fprintf(stderr, "error2parse\n");
             return -1;
         }
 
         strncpy(r->message_body, currentpos + message_matches[1].rm_so,
             message_matches[1].rm_eo - message_matches[1].rm_so);
-        returnvalue = message_matches[1].rm_eo - message_matches[1].rm_so;
+        //returnvalue = message_matches[1].rm_eo - message_matches[1].rm_so;
     } else {
         // if no \r\n\r\n at end, throw error!
         regfree(&request_regex);
         regfree(&header_regex);
         regfree(&message_regex);
+        fprintf(stderr, "error3parse\n");
         return -1;
     }
 
@@ -175,7 +184,8 @@ int populate(struct Request *r) {
     regfree(&request_regex);
     regfree(&header_regex);
     regfree(&message_regex);
-    return returnvalue;
+    fprintf(stderr, "noerror\n");
+    return finalpos + 2;
 }
 
 // writes file open error response to socket
@@ -232,8 +242,12 @@ int main(int argc, char **argv) {
         int socket = listener_accept(&listener);
         fprintf(stderr, "accepted connection \n");
 
+        // int flags = fcntl(socket, F_GETFL, 0);
+        // fcntl(socket, F_SETFL, flags | O_NONBLOCK);
+
         // read bytes from the user- start with 2048 bytes or until /r/n/r/n to see if the request is chilling
-        read_until(socket, buffer, 2048, "\r\n\r\n");
+        int ru = read_until(socket, buffer, 2048, "\r\n\r\n");
+        fprintf(stderr, "bytes read until %d\n", ru);
 
         // create a Request & initialize every field in it to 0
         struct Request r;
@@ -247,6 +261,7 @@ int main(int argc, char **argv) {
             close(socket);
             continue;
         }
+        //fprintf(stderr, "bytes we wanted written in first go %d \n", result);
 
         // other error handling that arises with file opening etc
         if (strcmp(r.method, "GET") == 0) {
@@ -295,6 +310,7 @@ int main(int argc, char **argv) {
 
             pass_n_bytes(fd, socket, filesize);
 
+            memset(buffer, 0, BUFFER_SIZE);
             close(fd);
 
         } else if (strcmp(r.method, "PUT") == 0) {
@@ -323,84 +339,18 @@ int main(int argc, char **argv) {
                 newfile = true;
             }
 
-            // write whatever's been captured in the message body already to the file
-            write_n_bytes(fd, r.message_body, result);
+            int bytes_to_write = ru - result;
+            fprintf(stderr, "bytes to write %d\n", bytes_to_write);
+            fprintf(stderr, "start index of messagebody %d\n", result);
+            int written = write_n_bytes(fd, buffer + result, bytes_to_write);
+            fprintf(stderr, "bytes written just now %d \n", written);
+            fprintf(stderr, "content value %d \n", atoi(r.value));
 
-            //pass_n_bytes(socket, fd, atoi(r.value) - result);
-            //printf("%d \n", resu);
+            while (written < atoi(r.value)) {
+                written += pass_n_bytes(socket, fd, atoi(r.value) - written);
+            }
+            
 
-            // now read all the request shit and then write it all to the file
-            // passing content-length bytes from request to file
-            char *ptr = NULL;
-            int bytes_left = strtol(r.value, &ptr, 10) - result;
-            fprintf(stderr, "bytes left %d \n", bytes_left);
-
-            int bytes_passed = pass_n_bytes(socket, fd, bytes_left);
-            fprintf(stderr, "bytes passed %d \n", bytes_passed);
-            fprintf(stderr, "errno: %s \n", strerror(errno));
-
-            // int bytes_read_total = 0;
-            // int bytes_read;
-            // while ((bytes_read = read(socket, buffer, bytes_left)) >= 0 && bytes_read_total < bytes_left) {
-
-            //     //set up appropriate number of bytes to write this iteration
-            //     int bytes_to_write_rn = bytes_read;
-            //     if (bytes_read_total + bytes_read > bytes_left) {
-            //         bytes_to_write_rn = bytes_left - bytes_read_total;
-            //     }
-
-            //     //write them
-            //     int bytes_written_total = 0;
-            //     while (bytes_written_total < bytes_to_write_rn) {
-
-            //         int bytes_written = write(fd, buffer + bytes_written_total, bytes_to_write_rn);
-
-            //         if (bytes_written < 0) {
-            //             fprintf(stderr, "Operation Failed\n");
-            //             close(fd);
-            //             return 1;
-            //         }
-
-            //         bytes_written_total += bytes_written;
-            //     }
-
-            //     bytes_read_total += bytes_read;
-            //     fprintf(stderr, "bytes read total %d \n", bytes_read_total);
-            // }
-
-            // int bytes_written = 0;
-            // int bytes_read;
-            // while (bytes_written < bytes_left) {
-            //     fprintf(stderr, "got in loop");
-
-            //     bytes_read = read_n_bytes(socket, buffer, bytes_left - bytes_written);
-            //     fprintf(stderr, "%d \n", bytes_read);
-            //     if (bytes_read > 0) {
-            //         fprintf(stderr, "%d \n", bytes_read);
-            //         bytes_written += write_n_bytes(fd, buffer, bytes_read);
-            //     }
-            //     else { break; }
-
-            // }
-            //fprintf(stderr, "%d \n", bytes_written);
-
-            //pass_n_bytes(socket, fd, bytes_left);
-
-            // //check for over    / under writing                                                               // can read more bytes if u try!
-            // if (bytes_left < 0 || read_n_bytes(socket, buffer, 1) >= 0) { // content length > message body or message body > content length
-            //     // delete file u wrote to
-            //     unlink(r.URI);
-
-            //     // if it was a new file we created, we can leave it deleted
-            //     // if it was an existing file, let's recreate it so it's there but empty
-            //     if (! newfile) {
-            //         fd = open(r.URI, O_CREAT | O_RDWR | O_TRUNC, 0666);
-            //     }
-
-            //     // now send out error message
-            //     write_n_bytes(socket, response_400, strlen(response_400));
-
-            // }
             if (newfile) {
                 write_n_bytes(socket, response_201, strlen(response_201));
             } else {
@@ -414,7 +364,17 @@ int main(int argc, char **argv) {
             write_n_bytes(socket, response_501, strlen(response_501));
         }
 
-        // close socket
+        // read remaining bytes in the socket
+        // check if more bytes recieved
+        int peek_result = recv(socket, buffer, BUFFER_SIZE, MSG_PEEK);
+        if (peek_result > 0) {
+            fprintf(stderr, "data available in buffer \n");
+            // consume the data lmfao
+            recv(socket, buffer, BUFFER_SIZE, 0);
+        }
+        
+        //finally close connection
         close(socket);
     }
 }
+
