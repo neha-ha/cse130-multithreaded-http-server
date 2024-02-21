@@ -13,7 +13,7 @@
 #include "asgn2_helper_funcs.h"
 
 // get buffer set up
-#define BUFFER_SIZE 6000
+#define BUFFER_SIZE 8000
 char buffer[BUFFER_SIZE];
 
 // define constant parts of return strings
@@ -66,11 +66,13 @@ struct Request {
 
     // necessary for PUT requests-- and the HeaderField.key must be 'Content-Length', with the value being the # of bytes in the message body
     // illegal for GET requests
-    char message_body[2000];
+    // char message_body[2000];
+    // NOTE: this worked, but was inefficient-- wasted 2000 of memory
+    // NOTE: instead, just return the beginning index of the message body that u match lmfao
 };
 // uses regex to parse the fields and fills Request appropriately
-// returns number of bytes read into the message_body section if it's OK
 // returns -1 for 400 bad request error code in the case of incorrect formatting
+// if all OK, returns the beginning index of the message body
 int populate(struct Request *r) {
 
     // capture groups are in parenthesis to get the designated fields
@@ -168,9 +170,9 @@ int populate(struct Request *r) {
             return -1;
         }
 
-        strncpy(r->message_body, currentpos + message_matches[1].rm_so,
-            message_matches[1].rm_eo - message_matches[1].rm_so);
-        //returnvalue = message_matches[1].rm_eo - message_matches[1].rm_so;
+        //strncpy(r->message_body, currentpos + message_matches[1].rm_so,
+        //message_matches[1].rm_eo - message_matches[1].rm_so);
+
     } else {
         // if no \r\n\r\n at end, throw error!
         regfree(&request_regex);
@@ -185,7 +187,7 @@ int populate(struct Request *r) {
     regfree(&header_regex);
     regfree(&message_regex);
     fprintf(stderr, "noerror\n");
-    return finalpos + 2;
+    return finalpos + 2; // + 2 to account for the \r\n after the last header match
 }
 
 // writes file open error response to socket
@@ -233,35 +235,32 @@ int main(int argc, char **argv) {
 
     // start looping the main process
     while (1) {
-        fprintf(stderr, "hii \n");
 
         // listen for and accept any connections at that socket
         // listener_accept blocks execution until a new incoming connection is made to this port
         // then returns a socket
         //      socket-- pretty much a file descriptor, it's used to read / send bytes from / to the client
         int socket = listener_accept(&listener);
-        fprintf(stderr, "accepted connection \n");
 
         // int flags = fcntl(socket, F_GETFL, 0);
         // fcntl(socket, F_SETFL, flags | O_NONBLOCK);
 
         // read bytes from the user- start with 2048 bytes or until /r/n/r/n to see if the request is chilling
-        int ru = read_until(socket, buffer, 2048, "\r\n\r\n");
-        fprintf(stderr, "bytes read until %d\n", ru);
+        int initial_byte_read = read_until(socket, buffer, 2048, "\r\n\r\n");
+        fprintf(stderr, "bytes read-until %d\n", initial_byte_read);
 
         // create a Request & initialize every field in it to 0
         struct Request r;
         memset(&r, 0, sizeof(struct Request));
 
         // use regex to populate the Request and it's subfields
-        int result = populate(&r);
+        int message_body_start = populate(&r);
         // check for bad request error & write response if so
-        if (result == -1) {
+        if (message_body_start == -1) {
             write_n_bytes(socket, response_400, strlen(response_400));
             close(socket);
             continue;
         }
-        //fprintf(stderr, "bytes we wanted written in first go %d \n", result);
 
         // other error handling that arises with file opening etc
         if (strcmp(r.method, "GET") == 0) {
@@ -289,10 +288,6 @@ int main(int argc, char **argv) {
             // printf("%ld \n", filesize);
 
             // convert filesize to string
-            // get max length of stringto allocate memory
-            // int maxLength = snprintf(NULL, 0, "%ld", filesize);
-            // char* fsize = (char*) malloc((maxLength + 1) * sizeof(char));
-            // sprintf(fsize, "%ld", filesize);
             char fsize[129] = { "\0" };
             sprintf(fsize, "%lu", filesize);
 
@@ -300,13 +295,6 @@ int main(int argc, char **argv) {
             write_n_bytes(socket, response_200, strlen(response_200));
             write_n_bytes(socket, fsize, strlen(fsize));
             write_n_bytes(socket, "\r\n\r\n", 4);
-
-            // now write the file contents
-            // int bytes_written = 0;
-            // int bytes_read;
-            // while ((bytes_read = read(fd, buffer, BUFFER_SIZE)) >= 0 && bytes_written < filesize) {
-            //     int bytes = write_n_bytes(socket, buffer, bytes_read);
-            // }
 
             pass_n_bytes(fd, socket, filesize);
 
@@ -339,10 +327,10 @@ int main(int argc, char **argv) {
                 newfile = true;
             }
 
-            int bytes_to_write = ru - result;
+            int bytes_to_write = initial_byte_read - message_body_start;
             fprintf(stderr, "bytes to write %d\n", bytes_to_write);
-            fprintf(stderr, "start index of messagebody %d\n", result);
-            int written = write_n_bytes(fd, buffer + result, bytes_to_write);
+            fprintf(stderr, "start index of messagebody %d\n", message_body_start);
+            int written = write_n_bytes(fd, buffer + message_body_start, bytes_to_write);
             fprintf(stderr, "bytes written just now %d \n", written);
             fprintf(stderr, "content value %d \n", atoi(r.value));
 
@@ -361,15 +349,6 @@ int main(int argc, char **argv) {
 
         } else { // unimplemented function
             write_n_bytes(socket, response_501, strlen(response_501));
-        }
-
-        // read remaining bytes in the socket
-        // check if more bytes recieved
-        int peek_result = recv(socket, buffer, BUFFER_SIZE, MSG_PEEK);
-        if (peek_result > 0) {
-            fprintf(stderr, "data available in buffer \n");
-            // consume the data lmfao
-            recv(socket, buffer, BUFFER_SIZE, 0);
         }
 
         //finally close connection
