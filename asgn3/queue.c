@@ -53,6 +53,7 @@ void queue_delete(queue_t **q) {
 
     // free array
     free((*q)->array);
+    (*q)->array = NULL;
 
     // free overall struct memory
     free(*q);
