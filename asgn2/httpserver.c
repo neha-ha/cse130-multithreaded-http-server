@@ -182,11 +182,12 @@ int populate(struct Request *r) {
         return -1;
     }
 
-    //if we reach this point, everything worked gg
+    // if we reach this point, everything worked gg
     regfree(&request_regex);
     regfree(&header_regex);
     regfree(&message_regex);
     fprintf(stderr, "noerror\n");
+    //  so return the start index of the message
     return finalpos + 2; // + 2 to account for the \r\n after the last header match
 }
 
@@ -298,7 +299,6 @@ int main(int argc, char **argv) {
 
             pass_n_bytes(fd, socket, filesize);
 
-            memset(buffer, 0, BUFFER_SIZE);
             close(fd);
 
         } else if (strcmp(r.method, "PUT") == 0) {
@@ -306,6 +306,13 @@ int main(int argc, char **argv) {
             // check version
             if (strcmp(r.version, "HTTP/1.1") != 0) {
                 write_n_bytes(socket, response_505, strlen(response_505));
+                close(socket);
+                continue;
+            }
+
+            // check that there is a content header
+            if (strcmp(r.key, "Content-Length") != 0) {
+                write_n_bytes(socket, response_400, strlen(response_400));
                 close(socket);
                 continue;
             }
@@ -327,6 +334,7 @@ int main(int argc, char **argv) {
                 newfile = true;
             }
 
+            // write the bytes that are part of the message body, but have already been read from the socket
             int bytes_to_write = initial_byte_read - message_body_start;
             fprintf(stderr, "bytes to write %d\n", bytes_to_write);
             fprintf(stderr, "start index of messagebody %d\n", message_body_start);
@@ -334,9 +342,13 @@ int main(int argc, char **argv) {
             fprintf(stderr, "bytes written just now %d \n", written);
             fprintf(stderr, "content value %d \n", atoi(r.value));
 
-            while (written < atoi(r.value)) {
-                written += pass_n_bytes(socket, fd, atoi(r.value) - written);
-            }
+            // write the rest of the message
+            // while (written < atoi(r.value)) {
+            //     written += pass_n_bytes(socket, fd, atoi(r.value) - written);
+            // }
+            int written2 = pass_n_bytes(socket, fd, atoi(r.value) - written);
+
+            fprintf(stderr, "bytes written rest of message %d \n", written2);
 
             if (newfile) {
                 write_n_bytes(socket, response_201, strlen(response_201));
@@ -352,6 +364,7 @@ int main(int argc, char **argv) {
         }
 
         //finally close connection
+        memset(buffer, 0, BUFFER_SIZE);
         close(socket);
     }
 }
