@@ -1,3 +1,1 @@
-# Assignment 4 directory
-
-This directory contains source code and other files for Assignment 4.
+Thread-safe implementation of an HTTP server, made by combining asgn2 and asgn3. Used a linked list to manage the rwlocks for each file, since the number of files was low. If handling a larger number of files, I would have used a hash map. 
