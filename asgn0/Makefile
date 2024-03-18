@@ -4,10 +4,8 @@ LDFLAGS=-lm
 
 EXECBIN=hello
 OBJS=\
-    hello.o \
-   
-
-
+    hello.o 
+	
 .PHONY: all clean
 
 all: hello
